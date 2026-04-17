@@ -3,82 +3,118 @@ import subprocess
 import os
 import uuid
 import sys
+import hashlib
 from concurrent.futures import ThreadPoolExecutor
 
-def detect_wildcard_status(domain):
-    """Silently detects the status code returned by a non-existent subdomain."""
-    random_string = str(uuid.uuid4())[:8]
-    url = f"http://{random_string}.{domain}"
+
+requests.packages.urllib3.disable_warnings()
+
+def get_fingerprint(url):
+    """Captures status, length, and a hash of the response body."""
     try:
-        # Fast timeout to avoid delaying the start of the main tools
-        response = requests.get(url, timeout=5, allow_redirects=False)
-        return response.status_code
+        # verify=False handles self-signed or mismatched certs on random subdomains
+        res = requests.get(url, timeout=5, allow_redirects=True, verify=False)
+        body_hash = hashlib.md5(res.text[:100].encode()).hexdigest()
+        return {
+            "status": str(res.status_code),
+            "size": str(len(res.content)),
+            "hash": body_hash
+        }
     except Exception:
         return None
 
-def get_crt_subdomains(domain):
-    """Passive discovery via crt.sh API."""
-    url = f"https://crt.sh/?q=%25.{domain}&output=json"
+def detect_wildcard_logic(domain):
+    """random subdomains over HTTP/HTTPS to find wildcard fingerprints."""
+    fps = []
+    protocols = ["http", "https"]
+    
+    print(f"[*] Analyzing wildcard behavior for {domain}...")
+    
+    for _ in range(3):
+        random_sub = f"{uuid.uuid4().hex[:8]}"
+        for proto in protocols:
+            url = f"{proto}://{random_sub}.{domain}"
+            fp = get_fingerprint(url)
+            if fp:
+                fps.append(fp)
+    
+  
+    unique_sizes = list(set(f["size"] for f in fps))
+    unique_codes = list(set(f["status"] for f in fps))
+    
+    return unique_sizes, unique_codes
+
+def get_vt_subdomains(domain):
+   
+    api_key = "virustotal api key here"
+    url = f"https://www.virustotal.com/api/v3/domains/{domain}/subdomains?limit=40"
+    headers = {
+        "accept": "application/json",
+        "x-apikey": api_key
+    }
+    
     subs = set()
     try:
-        response = requests.get(url, timeout=20)
+        response = requests.get(url, headers=headers, timeout=15)
         if response.status_code == 200:
             data = response.json()
-            for entry in data:
-                names = entry['name_value'].split('\n')
-                for name in names:
-                    clean_name = name.replace('*.', '').lower().strip()
-                    if (clean_name.endswith("." + domain) or clean_name == domain) and clean_name not in subs:
-                        print(clean_name)
-                        subs.add(clean_name)
+            for entry in data.get('data', []):
+                sub = entry.get('id', '').lower().strip()
+                if sub and sub not in subs:
+                    print(f"{sub}")
+                    subs.add(sub)
+        elif response.status_code == 429:
+            print("[!] VT Error: Rate limit (4 reqs/min) reached.")
     except Exception:
         pass
 
 def run_subfinder(domain):
-    """Passive discovery via Subfinder binary."""
-    # -silent ensures only found subdomains are printed
     cmd = ["subfinder", "-d", domain, "-silent"]
     try:
         process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
         for line in process.stdout:
             sub = line.strip()
             if sub:
-                print(sub)
+                print(f"{sub}")
         process.wait()
     except Exception:
         pass
 
-def run_ffuf(domain, wordlist, wildcard_code):
-    """Active discovery via ffuf brute-force."""
-    match_codes = ["200", "301", "302", "403"]
-    if wildcard_code and str(wildcard_code) in match_codes:
-        match_codes.remove(str(wildcard_code))
+def run_ffuf(domain, wordlist, sizes, codes):
+    """Runs ffuf and filters out the detected wildcard fingerprints."""
+    match_codes = ["200", "204", "301", "302", "307", "403", "405"]
+    for c in codes:
+        if c in match_codes:
+            match_codes.remove(c)
 
     cmd = [
         "ffuf",
         "-w", wordlist,
         "-u", f"http://FUZZ.{domain}",
         "-mc", ",".join(match_codes),
-        "-s",  # Silent mode
-        "-t", "100" 
+        "-s", 
+        "-t", "50"
     ]
+
     
+    if sizes:
+        cmd.extend(["-fs", ",".join(sizes)])
+
     try:
         process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
         for line in process.stdout:
-            word = line.strip()
-            if word:
-                print(f"{word}.{domain}")
+            print(f"{line.strip()}.{domain}")
         process.wait()
     except Exception:
         pass
 
 def main():
-    target = input("Enter domain: ").strip()
-    if not target:
-        return
-
-    # Normalization: remove protocol and paths
+    if len(sys.argv) > 1:
+        target = sys.argv[1]
+    else:
+        target = input("Enter domain: ").strip()
+    
+    if not target: return
     target = target.replace("http://", "").replace("https://", "").split("/")[0]
     
     wordlist = "subdomains.txt"
@@ -86,20 +122,22 @@ def main():
         print(f"Error: {wordlist} not found.")
         return
 
-    # Check for wildcard once before starting parallel tasks
-    wildcard_code = detect_wildcard_status(target)
+    
+    wildcard_sizes, wildcard_codes = detect_wildcard_logic(target)
+    
+    if wildcard_sizes:
+        print(f"[*] Wildcard detected. Filtering sizes: {', '.join(wildcard_sizes)}")
 
-    print(f"--- Enumerating {target} (CRT + Subfinder + FFUF) ---")
+    print(f"--- Starting Enumeration on {target} ---")
 
-    # Use 3 workers to run all three discovery paths simultaneously
+    
     with ThreadPoolExecutor(max_workers=3) as executor:
-        executor.submit(get_crt_subdomains, target)
+        executor.submit(get_vt_subdomains, target)
         executor.submit(run_subfinder, target)
-        executor.submit(run_ffuf, target, wordlist, wildcard_code)
+        executor.submit(run_ffuf, target, wordlist, wildcard_sizes, wildcard_codes)
 
 if __name__ == "__main__":
     try:
         main()
     except KeyboardInterrupt:
-        # os._exit(0) kills all threads immediately and silently
         os._exit(0)
