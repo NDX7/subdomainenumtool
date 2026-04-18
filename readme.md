@@ -12,11 +12,7 @@
     * **Censys** & **VirusTotal**
     * **Wayback Machine**
 * **Web Crawling (Pending):** Feature to extract subdomains by crawling the target website's frontend.
-* **Reverse DNS (Pending):** Identification of subdomains via IP range lookups.
-* **CSP Parsing (Pending):** Extraction of domains from Content Security Policy headers.
 
-### {2} DNS Validation
-* **Bruteforcing (Pending):** Implementation of DNS-based validation to confirm the status of discovered subdomains and filter out false positives.
 
 ### {3} Presentation & Output
 * **Sorting:** Automated deduplication and logical ordering of results.
@@ -32,10 +28,6 @@
 | Basic Fuzzing (ffuf) | ✅ Done |
 | API Integration (subfinder) | ✅ Done |
 | Sorting & Formatting | ✅ Done |
-| Web Crawling & Scraping | ⏳ Pending |
-| Reverse DNS Lookup | ⏳ Pending |
-| CSP Policy Parsing | ⏳ Pending |
-| DNS Bruteforce Validation | ⏳ Pending |
 
 ---
 
