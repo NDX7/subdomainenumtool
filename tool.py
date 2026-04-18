@@ -107,6 +107,9 @@ def run_ffuf(domain, wordlist, sizes, codes):
         process.wait()
     except Exception:
         pass
+def run_crt(domain):
+    cmd=f"curl -s 'https://crt.sh/?q=%25.{domain}&output=json' | jq -r '.[].name_value'"
+    os.system(f"{cmd} 2>/dev/null")#error handilinf 2>/dev/null
 
 def main():
     if len(sys.argv) > 1:
@@ -135,6 +138,7 @@ def main():
         executor.submit(get_vt_subdomains, target)
         executor.submit(run_subfinder, target)
         executor.submit(run_ffuf, target, wordlist, wildcard_sizes, wildcard_codes)
+        executor.submit(run_crt,domain)
 
 if __name__ == "__main__":
     try:
