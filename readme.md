@@ -30,5 +30,4 @@
 | Sorting & Formatting | ✅ Done |
 
 ---
-
-*Generated for SUBFIND Project Documentation*
+**project not completed welcome to be a part and make editions or adding features**
